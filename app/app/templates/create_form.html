@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block tittle %}Chess - Create{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <form method="post">
+        <div class = 'row'>
+            <div class="col"><h1>Create</h1></div>
+        </div>
+        <div class = 'row'>
+            <textarea class="input-code-area" id="board" name="board"></textarea>
+        </div>
+        <div class = 'row'>
+            <button class="btn btn-primary" type="submit">Submit</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
