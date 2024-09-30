@@ -3,7 +3,27 @@
 {% block tittle %}Chess - Home{% endblock %}
 
 {% block content %}
+<style>
+    @font-face { font-family: Chess Marroquin; src: {{ url_for('static', filename='MARRFONT.TTF') }}; }
+    .chess-font {
+        font-family: Chess Marroquin;
+        line-height: 1;
+    }
+</style>
+
+
+<input type="hidden" id="room-id" value="1">
 <div class="container my-5">
-    <div class="col">There'll be chess</div>
+    <div class="col">
+        <div class="form-floating">
+            <input class="form-control" id="move-field">
+            <label for="move-field">Put your move in</label>
+            <button class="btn" onclick="submitMove()" style="background-color:blue; color:white" id="submit-move-button">Submit Move</button>
+        </div>
+    </div>
+    <div class="col">
+        <h1 id="board" class="chess-font"></h1>
+    </div>
 </div>
+<script src="{{ url_for('static', filename='chess_script.js') }}"></script>
 {% endblock %}

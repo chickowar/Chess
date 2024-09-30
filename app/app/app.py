@@ -6,6 +6,8 @@ from random import randint
 from uuid import UUID, uuid4
 import os
 
+from chess_logic import MoveMaker
+
 "Setting Up"
 database_name = "chess.db"
 app = Flask(__name__)
@@ -15,6 +17,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 sio = SocketIO(app)
 
+# @TODO: Предположительно всё будет работать вызовом новых MoveMaker'ов от доски в бд,
+# @TODO: потом они будут коммитить ход и уничтожаться... нврн так
 
 "ORM"
 def new_id():
@@ -29,16 +33,38 @@ class BoardTable(db.Model):
 
 
 "Socketio Handlers"
+@sio.on('join')
+def handle_join(data):
+    room_id = data['room_id']
+    join_room(room_id)  # пока что одна комната
+    print(f'in-room {room_id}')
+    emit('update_board', test_board.proper_board(), room=room_id)
+    print('emitted')
+    pass
+
+@sio.on('submit-move')
+def handle_submit_move(data):
+    move = data['move']
+    try:
+        move_from, move_to = move.split('-')
+        test_board.make_move_safe(move_from, move_to)
+    except:
+        warn(f"IMPROPER MOVE - {move}")
+    emit('update_board', test_board.proper_board(), room=data['room_id'],broadcast=True)
+    pass
 
 
 "Endpoints"
-@app.route('/', methods=['POST', 'GET'])
+@app.route('/')
 def home():
-    if request.method == 'POST':
-        pass
     return render_template('home.html')
+    pass
+
 
 # FOR TESTING
+test_board = MoveMaker()
+
+
 @app.route('/read/<the_id>')
 def read_the_id(the_id):
     return str(read_board_table(the_id).board)
@@ -57,24 +83,38 @@ def create_board():
         # print(request.form)
         try:
             the_id = new_id()
-            newboard = BoardTable(id=the_id, board=request.form['board'])
-            append_db(db, newboard)
+            new_board = BoardTable(id=the_id, board=request.form['board'])
+            append_db(db, new_board)
             return redirect(f'/read/{the_id}')
         except Exception as e:
-            print(f"{e} thrown in create_board")
+            warn(f"EXCEPTION: {e} thrown in create_board")
     return render_template('create_form.html')
 
 
 "Utils"
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def warn(text):
+    print(bcolors.WARNING + text + bcolors.ENDC)
+
 def append_db(database: SQLAlchemy, data: BoardTable, with_id: int | None = None):
     try:
         database.session.add(data)
         database.session.commit()
-        print('committed')
+        warn('committed')
         if with_id:
-            print(with_id, read_board_table(with_id))
+            warn(f"{with_id} {read_board_table(with_id)}")
     except Exception as e:
-        print(f"{e} thrown in append_db({data})")
+        warn(f"{e} thrown in append_db({data})")
 
 def read_board_table(pk: int):
     return BoardTable.query.get_or_404(pk)
