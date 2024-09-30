@@ -1,6 +1,11 @@
+local_debug = False
+
 class MoveMaker:
+    # @TODO: when you're going to make it all stored in sqlite, just make new movemakers every time
+    # @TODO: and make a .get_info_to_store() method to extract board and turn to put into sqlite table
+    # @TODO: Also later add deque of all the moves, and you can store basic json of moves in sqlite
+
     board = list('tMvWlVmTOoOoOoOo + + + ++ + + +  + + + ++ + + + pPpPpPpPRnBqKbNr')
-    turn = 'white'
     proper_pos = {'a8': 0, 0: 'a8',
                   'b8': 1, 1: 'b8',
                   'c8': 2, 2: 'c8',
@@ -83,9 +88,10 @@ class MoveMaker:
     black_pieces = {'l', 'L', 'w', 'W', 'm', 'M', 'v', 'V', 't', 'T', 'o', 'O'}
     white_pieces = {'k', 'K', 'q', 'Q', 'n', 'N', 'b', 'B', 'r', 'R', 'p', 'P'}
 
-    def __init__(self, board: str | list | None = None) -> None:
+    def __init__(self, board: str | list | None = None, turn: str = 'white') -> None:
         if board is not None:
             self.board = list(board)
+        self.turn = turn
         pass
 
     def proper_board(self, for_console=False):
@@ -93,9 +99,9 @@ class MoveMaker:
         If you set for_console to True it will divide rows by '/n',
         otherwise it will divide them by '<br />' for HTML."""
         if for_console:
-            delim = '\n'
+            delim = '|\n'
         else:
-            delim = '<br />'
+            delim = '|<br />'
         ret = ''
         for i in range(8):
             i8 = i*8
@@ -138,7 +144,7 @@ class MoveMaker:
                 self.board[pos] = self.board[pos].upper()
         pass
 
-    def check_piece_color_(self, pos: int) -> str:
+    def check_piece_color(self, pos: int) -> str:
         """
         Checks the color of the piece on the tile
 
@@ -150,6 +156,15 @@ class MoveMaker:
             return 'black'
         else:
             return 'white'
+
+    def check_piece(self, pos: int) -> bool:
+        """
+        Checks if a piece is on pos or an empty square
+        """
+        if self.board[pos] == ' ' or self.board[pos] == '+':
+            return False
+        else:
+            return True
 
     # CALL AFTER MAKING SURE MOVE IS POSSIBLE!
     def make_move(self, tile_from: int, tile_to: int) -> None:
@@ -172,42 +187,550 @@ class MoveMaker:
         return False
         pass
 
-    def move_is_safe(self, tile_from: int, tile_to: int) -> bool:
+    def move_is_legal(self, tile_from: int, tile_to: int) -> bool:
         """
         Checks whether moving from tile_from to tile_to
         is within the rules
         """
-        # keep the rules basic for now
-        if 0 <= tile_from < 64 and 0 <= tile_to < 64:
+        # makes a PieceChecker and checks legal moves
+        pc = PieceChecker(tile_from, self.board, self.turn)
+        if tile_to in pc.legal_moves():
             return True
         else:
             return False
         pass
 
-    def make_move_safe(self, tile_from: str | int, tile_to: str | int) -> str:
+    def make_move_safe(self, tile_from: str | int, tile_to: str | int) -> str:  # ######################################
         """
         Makes a move from tile_from to tile_to.
         But only if it is within the rules!
 
-        returns 'MoveMade' if move is made, 'MoveError' otherwise.
+        returns 'MoveMade' if move is made, 'MoveError : {description}' otherwise.
         """
 
         if isinstance(tile_from, str):
             if not self.is_a_tile(tile_from):
-                return 'MoveError'
+                return 'MoveError: tile_from is not a tile'
             tile_from = self.proper_pos[tile_from]
         if isinstance(tile_to, str):
             if not self.is_a_tile(tile_to):
-                return 'MoveError'
+                return 'MoveError: tile_to is not a tile'
             tile_to = self.proper_pos[tile_to]
 
-        if self.move_is_safe(tile_from, tile_to):
+        piece_color = self.check_piece_color(tile_from)
+        if piece_color == '':
+            return 'MoveError: no piece on tile_from'
+        elif piece_color != self.turn:
+            return "MoveError: trying to move opponent's piece"
+
+        if self.move_is_legal(tile_from, tile_to):
             self.make_move(tile_from, tile_to)
             self.change_turn()
             return 'MoveMade'
         else:
-            return 'MoveError'
+            return 'MoveError: illegal move'
+        pass  # ########################################################################################################
+
+# @TODO: (можно кстати на nparray'и переписать. Может быть полезно)
+# для проверки того, наступает ли король на клетку, которую уже атакуют,
+# можно вести два массива - атакованных клеток (один для черных,другой для белых).
+# когда фигура ставится на какую-то клетку, все клетки, на которые она может встать +1,
+# когда фигура уходит с этой клетки, то на всех этих клетках -1
+
+
+class PieceChecker(MoveMaker):
+    def __init__(self, pos: int, board: list[str], turn: str):
+        """it makes an object which determines
+        which piece is on the pos of the board"""
+        super().__init__(board, turn)
+        # I don't like that we are essentially making 3 classes per move:
+        # MoveMaker -> PieceChecker (in move_is_legal method) -> NEW MoveMaker (in __init__ of PieceChecker)
+        # perhaps we could make 1st and 2nd MoveMaker the same by something like
+
+        # def __init__(self, move_maker_obj: MoveMaker):
+        #     super() = move_maker_obj
+
+        self.piece = None
+        self.color = None
+        self.pos = pos
+        self.row = pos >> 3
+        self.col = pos & 7
+        tile = board[pos].lower()
+        if tile == "+" or tile == "-":
+            pass  # the square is empty
+            return
+
+        # Getting the piece (and its color) of the tile
+        match tile:
+            case "l":
+                self.color = "black"
+                self.piece = "king"
+            case "k":
+                self.color = "white"
+                self.piece = "king"
+            case "w":
+                self.color = "black"
+                self.piece = "queen"
+            case "q":
+                self.color = "white"
+                self.piece = "queen"
+            case "m":
+                self.color = "black"
+                self.piece = "knight"
+            case "n":
+                self.color = "white"
+                self.piece = "knight"
+            case "v":
+                self.color = "black"
+                self.piece = "bishop"
+            case "b":
+                self.color = "white"
+                self.piece = "bishop"
+            case "t":
+                self.color = "black"
+                self.piece = "rook"
+            case "r":
+                self.color = "white"
+                self.piece = "rook"
+            case "o":
+                self.color = "black"
+                self.piece = "pawn"
+            case "p":
+                self.color = "white"
+                self.piece = "pawn"
+        pass
+
+    def can_delta_move(self, dx, dy):
+        """Returns True if moving dx horizontally
+        and dy vertically is still within the board,
+        returns False otherwise"""
+        return (0 <= (self.col + dx) < 8) and (0 <= (self.row + dy) < 8)
+
+    def legal_moves(self) -> set:
+        """returns all legal moves for a piece"""
+        if self.piece is None or self.color != self.turn:
+            # print('WTF!!!!!!!????????')
+            return set()
+        # print('legal_moves: getting attribute - ')  # @TODO:DELETE ---------------------------------------------REMOVE
+        # print(self.__getattribute__(f"{self.color}_{self.piece}_moves")())
+        # print(f"{self.color}_{self.piece}_moves")
+        return self.__getattribute__(f"{self.color}_{self.piece}_moves")()
+
+    pass
+
+    def white_king_moves(self) -> set:
+        # @TODO: добавить проверку на то атакованы ли поля и на рокировку
+        ret = set()
+        for i in [1, -1, 0]:
+            for j in [1, -1, 0]:
+                if self.can_delta_move(i,j):
+                    newpos = self.pos + i * 8 + j
+                    ret.add(newpos)
+        return ret
+
+    def black_king_moves(self) -> set:
+        return self.white_king_moves()
+
+    def white_queen_moves(self) -> set:
+        ret = set()
+        right_up = True
+        right = True
+        right_down = True
+        down = True
+        left_down = True
+        left = True
+        left_up = True
+        up = True
+        for i in range(1, 8):
+            # O - is where the piece is headed
+
+            #  O
+            # /
+            i8 = i << 3
+            if right_up:
+                newpos = self.pos + i - i8
+                if self.can_delta_move(i, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right_up = False
+                    else:
+                        right_up = False
+                else:
+                    right_up = False
+
+            # -O
+            if right:
+                newpos = self.pos + i
+                if self.can_delta_move(i, 0):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right = False
+                    else:
+                        right = False
+                else:
+                    right = False
+            # \
+            #  O
+            if right_down:
+                newpos = self.pos + i + i8
+                if self.can_delta_move(i, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right_down = False
+                    else:
+                        right_down = False
+                else:
+                    right_down = False
+
+            # |
+            # O
+            if down:
+                newpos = self.pos + i8
+                if self.can_delta_move(0, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        down = False
+                    else:
+                        down = False
+                else:
+                    down = False
+
+            #  /
+            # O
+            if left_down:
+                newpos = self.pos - i + i8
+                if self.can_delta_move(-i, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left_down = False
+                    else:
+                        left_down = False
+                else:
+                    left_down = False
+
+            # O-
+            if left:
+                newpos = self.pos - i
+                if self.can_delta_move(-i, 0):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left = False
+                    else:
+                        left = False
+                else:
+                    left = False
+
+            # O
+            #  \
+            if left_up:
+                newpos = self.pos - i - i8
+                if self.can_delta_move(-i, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left_up = False
+                    else:
+                        left_up = False
+                else:
+                    left_up = False
+
+            # O
+            # |
+            if up:
+                newpos = self.pos - i8
+                if self.can_delta_move(0, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        up = False
+                    else:
+                        up = False
+                else:
+                    up = False
+
+        return ret
+
+    def black_queen_moves(self) -> set:
+        return self.white_queen_moves()
+
+    def white_rook_moves(self) -> set:
+        ret = set()
+        right = True
+        down = True
+        left = True
+        up = True
+        for i in range(1, 8):
+            # O - is where the piece is headed
+            i8 = i << 3
+            # -O
+            if right:
+                newpos = self.pos + i
+                if self.can_delta_move(i, 0):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right = False
+                    else:
+                        right = False
+                else:
+                    right = False
+
+            # |
+            # O
+            if down:
+                newpos = self.pos + i8
+                if self.can_delta_move(0, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        down = False
+                    else:
+                        down = False
+                else:
+                    down = False
+
+            # O-
+            if left:
+                newpos = self.pos - i
+                if self.can_delta_move(-i, 0):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left = False
+                    else:
+                        left = False
+                else:
+                    left = False
+
+            # O
+            # |
+            if up:
+                newpos = self.pos - i8
+                if self.can_delta_move(0, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        up = False
+                    else:
+                        up = False
+                else:
+                    up = False
+        return ret
+
+    def black_rook_moves(self) -> set:
+        return self.white_rook_moves()
+
+    def white_bishop_moves(self) -> set:
+        ret = set()
+        right_up = True
+        right_down = True
+        left_down = True
+        left_up = True
+        for i in range(1, 8):
+            # O - is where the piece is headed
+
+            #  O
+            # /
+            i8 = i << 3
+            if right_up:
+                newpos = self.pos + i - i8
+                if self.can_delta_move(i, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right_up = False
+                    else:
+                        right_up = False
+                else:
+                    right_up = False
+
+            # \
+            #  O
+            if right_down:
+                newpos = self.pos + i + i8
+                if self.can_delta_move(i, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        right_down = False
+                    else:
+                        right_down = False
+                else:
+                    right_down = False
+
+            #  /
+            # O
+            if left_down:
+                newpos = self.pos - i + i8
+                if self.can_delta_move(-i, i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left_down = False
+                    else:
+                        left_down = False
+                else:
+                    left_down = False
+
+            # O
+            #  \
+            if left_up:
+                newpos = self.pos - i - i8
+                if self.can_delta_move(-i, -i):
+                    piece_color = self.check_piece_color(newpos)
+                    if piece_color == '':
+                        ret.add(newpos)
+                    elif piece_color != self.color:
+                        ret.add(newpos)
+                        left_up = False
+                    else:
+                        left_up = False
+                else:
+                    left_up = False
+
+        return ret
+
+    def black_bishop_moves(self) -> set:
+        return self.white_bishop_moves()
+
+    def white_knight_moves(self) -> set:
+        ret = set()
+
+        for dx, dy in [(1, 2), (1,-2), (-1, 2), (-1, -2),
+                       (2, 1), (2, -1), (-2, 1), (-2, -1)]:
+            newpos = self.pos + dx + (dy << 3)
+            if not self.can_delta_move(dx, dy) or self.check_piece_color(newpos) == self.color:
+                continue
+            else:
+                ret.add(newpos)
+
+        return ret
+
+    def black_knight_moves(self) -> set:
+        return self.white_knight_moves()
+
+    def white_pawn_moves(self) -> set:
+        # @TODO: MAKE PAWNS PROMOTE!
+        # @TODO: MAKE EN PASSANT (probs after making list of moves)
+        ret = set()
+        forward = self.pos - 8
+        double_forward = self.pos - 16
+#         print(f"""==========white_pawn_moves=================:        < --------------------------------------- REMOVE
+# pos {self.pos}
+# forward {forward}
+# double_forward {double_forward}
+# self.can_delta_move(0, -1) {self.can_delta_move(0, -1)}
+# self.check_piece(forward) {self.check_piece(forward)}
+# col {self.col}
+# row {self.row}
+# ===============================================""")
+        if self.can_delta_move(0, -1) and not self.check_piece(forward):
+            ret.add(forward)
+            if self.row == 6 and not self.check_piece(double_forward):
+                ret.add(double_forward)
+        if self.can_delta_move(1, -1):
+            newpos = self.pos - 7
+            if self.check_piece_color(newpos) == 'black':
+                ret.add(newpos)
+        if self.can_delta_move(-1, -1):
+            newpos = self.pos - 9
+            if self.check_piece_color(newpos) == 'black':
+                ret.add(newpos)
+
+        return ret
+
+    def black_pawn_moves(self) -> set:
+        # @TODO: same as white todos
+        ret = set()
+        forward = self.pos + 8
+        double_forward = self.pos + 16
+        if self.can_delta_move(0, 1) and not self.check_piece(forward):
+            ret.add(forward)
+            if self.row == 1 and not self.check_piece(double_forward):
+                ret.add(double_forward)
+        if self.can_delta_move(1, 1):
+            newpos = self.pos + 9
+            if self.check_piece_color(newpos) == 'white':
+                ret.add(newpos)
+        if self.can_delta_move(-1, 1):
+            newpos = self.pos + 7
+            if self.check_piece_color(newpos) == 'white':
+                ret.add(newpos)
+        return ret
+
+    pass
+
 
 if __name__ == '__main__':
+    local_debug = True
+
     a = MoveMaker()
-    print(a.proper_board())
+
+    def board_print(move=None):
+        if move is not None:
+            fr, to = move.split('-')
+            a.make_move_safe(fr, to)
+            board_print()
+            return
+        print(a.proper_board(for_console=True), end = '')
+        print(a.turn + ' is to move\n')
+
+    def get_legal_moves(pos, print_tiles = True):
+        board = a.board
+        if isinstance(pos, str):
+            pos = a.proper_pos[pos]
+        print(f'--------legal_moves_for {board[pos]}-------')
+        a.check_piece_color(pos)
+        pc = PieceChecker(pos, board, a.check_piece_color(pos))
+        for i in pc.legal_moves():
+            print(f'{a.proper_pos[i]} ', end = '')
+        print("\n--------------------------------")
+
+
+
+    board_print('d2-d4')
+    board_print('d7-d5')
+    get_legal_moves('d1')
+    # board_print()
+    # board_print('e2-e4')
+    # board_print('d7-d5')
+    # get_legal_moves('d1')
+    # get_legal_moves('d8')
+    # board_print('d1-h5')
+    # get_legal_moves('h5')

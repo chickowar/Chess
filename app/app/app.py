@@ -8,6 +8,9 @@ import os
 
 from chess_logic import MoveMaker
 
+...
+
+
 "Setting Up"
 database_name = "chess.db"
 app = Flask(__name__)
@@ -20,6 +23,10 @@ sio = SocketIO(app)
 # @TODO: Предположительно всё будет работать вызовом новых MoveMaker'ов от доски в бд,
 # @TODO: потом они будут коммитить ход и уничтожаться... нврн так
 
+
+...
+
+
 "ORM"
 def new_id():
     return int(randint(0,9223372036854775807))
@@ -30,6 +37,9 @@ class BoardTable(db.Model):
 
     def __repr__(self):
         return f"<board is {self.board}>"
+
+
+...
 
 
 "Socketio Handlers"
@@ -46,12 +56,18 @@ def handle_join(data):
 def handle_submit_move(data):
     move = data['move']
     try:
+        # print('handle_submit_move: trying to split')
         move_from, move_to = move.split('-')
-        test_board.make_move_safe(move_from, move_to)
-    except:
-        warn(f"IMPROPER MOVE - {move}")
+        # print('handle_submit_move: trying_to_move')
+        result = test_board.make_move_safe(move_from, move_to)
+        print(result)
+    except Exception as e:
+        warn(f"IMPROPER MOVE - {move} | {e}")
     emit('update_board', test_board.proper_board(), room=data['room_id'],broadcast=True)
     pass
+
+
+...
 
 
 "Endpoints"
@@ -89,6 +105,9 @@ def create_board():
         except Exception as e:
             warn(f"EXCEPTION: {e} thrown in create_board")
     return render_template('create_form.html')
+
+
+...
 
 
 "Utils"

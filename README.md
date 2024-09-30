@@ -1,14 +1,15 @@
 # Chess
 Trying to make web platform for Chess (Sweden Variation)
 
-# 0.1.1 - actually working!!!!
-### This version will be done 'kinda' as a monolith (meaning all the logic will be in app\app.py)
-Commit - "Working board no logic"
-Only 1 room, but already has join functionality.
-Has a working board, on which you can move pieces through text 
-(like 'a2-a4' or 'b8-c6' and pressing enter).
+# 0.1.2 - chess logic in piece movement
 
-1) Next thing to work on: chess logic
+### This version will be done 'kinda' as a monolith (meaning all the logic will be in app\app.py)
+Commit - "Actual chess logic in piece movement"
+1 room, working board, ACTUAL CHESS LOGIC, you take turns (you cant move white piece twice)
+#### Faults: no castling, no en passant, no checks and mates
+check todos in chess_logic.py
+
+1) Next: Cosmetic changes to the board (i want to see numbers and letters)
 2) after that: proper room joining
 3) after that: storing everything in sqlite
 4) after that: ... 
