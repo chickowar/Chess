@@ -9,20 +9,45 @@
         font-family: Chess Marroquin;
         line-height: 1;
     }
+
+    @font-face { font-family: Chock A Block NF; src: {{ url_for('static', filename='Chock-a-BlockNF.ttf') }}; }
+
+    @font-face { font-family: Curved Square; src: {{ url_for('static', filename='Curved Square.ttf') }}; }
+    .block-font {
+        font-family: Chock A Block NF, Curved Square;
+        line-height: 1;
+<!--        text-align: center;-->
+    }
+
 </style>
 
 
 <input type="hidden" id="room-id" value="1">
 <div class="container my-5">
-    <div class="col">
+    <div class="row">
         <div class="form-floating">
             <input class="form-control" id="move-field">
             <label for="move-field">Put your move in</label>
             <button class="btn" onclick="submitMove()" style="background-color:blue; color:white" id="submit-move-button">Submit Move</button>
         </div>
     </div>
-    <div class="col">
-        <h1 id="board" class="chess-font"></h1>
+    <div class="row">
+        <div class="col" style="text-align: right; padding-right: 0;">
+            <h1 id="numbers" class="block-font">
+                8<br>7<br>6<br>5<br>4<br>3<br>2<br>1
+            </h1>
+        </div>
+        <div class="col" style="text-align: center; padding-left:0; padding-right:0;">
+            <h1 id="board" class="chess-font"></h1>
+        </div>
+        <div class="col"></div>
+    </div>
+    <div class="row" style="text-align: center;">
+        <div class="col"></div>
+        <div class="col" style="text-align: center; padding-left:0; padding-right:7;">
+            <h1 class="block-font" style="letter-spacing: 3px;">ABCDEFGH</h1>
+        </div>
+        <div class="col"></div>
     </div>
 </div>
 <script src="{{ url_for('static', filename='chess_script.js') }}"></script>

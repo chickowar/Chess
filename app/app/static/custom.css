@@ -1,0 +1,14 @@
+/*
+@font-face { font-family: Chess Marroquin; src: {{ url_for('static', filename='MARRFONT.TTF') }}; }
+.chess-font {
+    font-family: Chess Marroquin;
+    line-height: 1;
+ }
+
+
+.square-font {
+    line-height: 1;
+    letter-spacing: 17px;
+    text-align: center;
+}
+*/
