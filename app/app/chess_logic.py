@@ -1,5 +1,16 @@
 local_debug = False
 
+"""Utils"""
+is_queen = lambda x: x == 'w' or x == 'q'
+is_bishop = lambda x: x == 'v' or x == 'b'
+is_rook = lambda x: x == 't' or x == 'r'
+is_knight = lambda x: x == 'm' or x == 'n'
+is_king = lambda x: x == 'l' or x == 'k'
+is_pawn = lambda x: x == 'o' or x == 'p'
+
+"""MoveMaker"""
+
+
 class MoveMaker:
     # @TODO: when you're going to make it all stored in sqlite, just make new movemakers every time
     # @TODO: and make a .get_info_to_store() method to extract board and turn to put into sqlite table
@@ -85,13 +96,17 @@ class MoveMaker:
         "WhiteRook": 'r',
         "WhitePawn": 'p'
     }
+
     black_pieces = {'l', 'L', 'w', 'W', 'm', 'M', 'v', 'V', 't', 'T', 'o', 'O'}
     white_pieces = {'k', 'K', 'q', 'Q', 'n', 'N', 'b', 'B', 'r', 'R', 'p', 'P'}
+    pc = None
 
     def __init__(self, board: str | list | None = None, turn: str = 'white') -> None:
+        self.kings = {'black': 4, 'white': 60}
         if board is not None:
             self.board = list(board)
         self.turn = turn
+        self.king_moved = {'white': False, 'black': False}
         pass
 
     def proper_board(self, for_console=False):
@@ -104,16 +119,16 @@ class MoveMaker:
             delim = '|<br />'
         ret = ''
         for i in range(8):
-            i8 = i*8
+            i8 = i * 8
             ret += ('|' +
                     self.board[i8] +
-                    self.board[i8+1] +
-                    self.board[i8+2] +
-                    self.board[i8+3] +
-                    self.board[i8+4] +
-                    self.board[i8+5] +
-                    self.board[i8+6] +
-                    self.board[i8+7] +
+                    self.board[i8 + 1] +
+                    self.board[i8 + 2] +
+                    self.board[i8 + 3] +
+                    self.board[i8 + 4] +
+                    self.board[i8 + 5] +
+                    self.board[i8 + 6] +
+                    self.board[i8 + 7] +
                     delim)
         return ret
 
@@ -132,7 +147,7 @@ class MoveMaker:
         """
         row = pos >> 3  # division by 8
         col = pos & 7  # pos % 8
-        if (row+col) & 1 == 0:  # if (row+col) % 2 == 0 - WHITE
+        if (row + col) & 1 == 0:  # if (row+col) % 2 == 0 - WHITE
             if self.board[pos] == '+':
                 self.board[pos] = ' '
             else:
@@ -173,6 +188,8 @@ class MoveMaker:
         from tile_from to tile_to
         """
         # tile_to set to tile_from value, and then make tile_from empty
+        if is_king(self.board[tile_from]):
+            self.kings[self.check_piece_color(tile_from)] = tile_to
         self.board[tile_to] = self.board[tile_from]
         self.colorize_tile(tile_to)
 
@@ -193,8 +210,8 @@ class MoveMaker:
         is within the rules
         """
         # makes a PieceChecker and checks legal moves
-        pc = PieceChecker(tile_from, self.board, self.turn)
-        if tile_to in pc.legal_moves():
+        self.pc = PieceChecker(tile_from, self.board, self.turn)
+        if tile_to in self.pc.legal_moves():
             return True
         else:
             return False
@@ -224,21 +241,46 @@ class MoveMaker:
             return "MoveError: trying to move opponent's piece"
 
         if self.move_is_legal(tile_from, tile_to):
+
+            if (tile_from == self.kings[self.turn] and (tile_to == self.kings[self.turn] + 2
+               or tile_to == self.kings[self.turn] - 2) and not self.king_moved[self.turn]):
+                col = tile_from & 7
+                if tile_to == self.kings[self.turn] - 2:
+                    rook_pos = tile_from - col
+                    if is_rook(self.board[rook_pos].lower()):
+                        self.make_move(tile_from, tile_to)
+                        self.make_move(rook_pos, tile_to + 1)
+                        return 'MoveMade'
+                    else:
+                        return 'MoveError: rook is missing for O-O-O'
+                else:
+                    rook_pos = tile_from - col + 7
+                    if is_rook(self.board[rook_pos].lower()):
+                        self.make_move(tile_from, tile_to)
+                        self.make_move(rook_pos, tile_to - 1)
+                        return 'MoveMade'
+                    else:
+                        return 'MoveError: rook is missing for O-O'
+
             self.make_move(tile_from, tile_to)
+            # move_is_legal(tile_from, tile_to) set pc to PieceChecker with pos = tile_from
+            # WE CAN EITHER CHANGE MOVE_IS_LEGAL TO INVOLVE MOVING PIECE AND CHECKING WHETHER KING IS IN CHECK
+            # OR WE CAN DO IT HERE. FOR THIS VERSION WE DO IT HERE.
+            if self.pc.there_is_check(self.kings[self.turn]):
+                self.make_move(tile_to, tile_from)
+                return "MoveError: the king mustn't be endangered"
             self.change_turn()
             return 'MoveMade'
         else:
             return 'MoveError: illegal move'
         pass  # ########################################################################################################
 
+
 # @TODO: (можно кстати на nparray'и переписать. Может быть полезно)
-# для проверки того, наступает ли король на клетку, которую уже атакуют,
-# можно вести два массива - атакованных клеток (один для черных,другой для белых).
-# когда фигура ставится на какую-то клетку, все клетки, на которые она может встать +1,
-# когда фигура уходит с этой клетки, то на всех этих клетках -1
 
 
 class PieceChecker(MoveMaker):
+
     def __init__(self, pos: int, board: list[str], turn: str):
         """it makes an object which determines
         which piece is on the pos of the board"""
@@ -318,14 +360,201 @@ class PieceChecker(MoveMaker):
 
     pass
 
+    def there_is_check(self, pos: int | str) -> bool:
+        """
+        returns True if the field is a check for a king of self.color
+        color if it was on pos position, False otherwise.
+        If you use it to check for king moves, remove king first
+        """
+        if isinstance(pos, str):
+            pos = self.proper_pos[pos]
+
+        row = pos >> 3
+        col = pos & 7
+        right_up = True
+        right = True
+        right_down = True
+        down = True
+        left_down = True
+        left = True
+        left_up = True
+        up = True
+        "Queen | Rook | Bishop"
+        for i in range(1, 8):
+            # O - is where the piece is headed
+
+            #  O
+            # /
+            i8 = i << 3
+            if right_up:
+                newpos = pos + i - i8
+                if (0 <= (col + i) < 8) and (0 <= (row - i) < 8):
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        right_up = False
+                else:
+                    right_up = False
+
+            # -O
+            if right:
+                newpos = pos + i
+                if 0 <= (col + i) < 8:
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        right = False
+                else:
+                    right = False
+            # \
+            #  O
+            if right_down:
+                newpos = pos + i + i8
+                if (0 <= (col + i) < 8) and (0 <= (row + i) < 8):
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        right_down = False
+                else:
+                    right_down = False
+
+            # |
+            # O
+            if down:
+                newpos = pos + i8
+                if 0 <= (row + i) < 8:
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        down = False
+                else:
+                    down = False
+
+            #  /
+            # O
+            if left_down:
+                newpos = pos - i + i8
+                if (0 <= (col - i) < 8) and (0 <= (row + i) < 8):
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        left_down = False
+                else:
+                    left_down = False
+
+            # O-
+            if left:
+                newpos = pos - i
+                if 0 <= (col - i) < 8:
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        left = False
+                else:
+                    left = False
+
+            # O
+            #  \
+            if left_up:
+                newpos = pos - i - i8
+                if (0 <= (col - i) < 8) and (0 <= (row - i) < 8):
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        left_up = False
+                else:
+                    left_up = False
+
+            # O
+            # |
+            if up:
+                newpos = pos - i8
+                if 0 <= (row - i) < 8:
+                    piece_color = self.check_piece_color(newpos)
+                    tile = self.board[newpos].lower()
+                    if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
+                        return True
+                    else:
+                        up = False
+                else:
+                    up = False
+
+        "Knight"
+        for dx, dy in [(1, 2), (1, -2), (-1, 2), (-1, -2),
+                       (2, 1), (2, -1), (-2, 1), (-2, -1)]:
+            newpos = pos + dx + (dy << 3)
+            if ((0 <= (col + dx) < 8) and (0 <= (row + dy) < 8)
+                    and is_knight(self.board[newpos].lower())
+                    and self.check_piece_color(newpos) != self.color):
+                return True
+
+        "King"
+        for i in range(-1, 2):
+            for j in range(-1, 2):
+                if i == j == 0:
+                    continue
+                if (0 <= (col + i) < 8) and (0 <= (row + j) < 8):
+                    newpos = pos + i + (j << 3)
+                    tile = self.board[newpos].lower()
+                    if is_king(tile) and self.color != self.check_piece_color(newpos):
+                        return True
+
+        "Pawn"
+        is_white = int(self.color == 'white')
+        if 0 <= (row + is_white) < 8:
+            newpos = pos + (is_white >> 3) + 1
+            if (0 < (col + 1) < 8) and is_pawn(self.board[newpos].lower()
+                ) and self.color != self.check_piece_color(newpos):
+                return True
+            newpos = pos + (is_white >> 3) - 1
+            if (0 < (col - 1) < 8) and is_pawn(self.board[newpos].lower()
+                ) and self.color != self.check_piece_color(newpos):
+                return True
+        return False
+
     def white_king_moves(self) -> set:
-        # @TODO: добавить проверку на то атакованы ли поля и на рокировку
+        """Does not check for checks!"""
+        # @TODO: добавить проверку на рокировку
         ret = set()
         for i in [1, -1, 0]:
             for j in [1, -1, 0]:
-                if self.can_delta_move(i,j):
-                    newpos = self.pos + i * 8 + j
+                if (i != 0 or j != 0) and self.can_delta_move(i, j):
+                    newpos = self.pos + (i << 3) + j
+                    # if self.there_is_check(newpos):
                     ret.add(newpos)
+        if not self.king_moved[self.color]:
+            tile1 = self.board[self.pos + 1]
+            tile2 = self.board[self.pos + 2]
+            if (
+                self.can_delta_move(self.col + 1, self.row) and (tile1 == ' ' or tile1 == '+')
+                and not self.there_is_check(self.pos + 1)  and
+                self.can_delta_move(self.col + 2, self.row) and (tile2 == ' ' or tile2 == '+')
+                and not self.there_is_check(self.pos + 2)
+            ):
+                ret.add(self.pos + 2)
+            tile1 = self.board[self.pos - 1]
+            tile2 = self.board[self.pos - 2]
+            if (
+                    self.can_delta_move(self.col - 1, self.row) and (tile1 == ' ' or tile1 == '+')
+                    and not self.there_is_check(self.pos - 1) and
+                    self.can_delta_move(self.col - 2, self.row) and (tile2 == ' ' or tile2 == '+')
+                    and not self.there_is_check(self.pos - 2)
+            ):
+                ret.add(self.pos - 2)
         return ret
 
     def black_king_moves(self) -> set:
@@ -632,7 +861,7 @@ class PieceChecker(MoveMaker):
     def white_knight_moves(self) -> set:
         ret = set()
 
-        for dx, dy in [(1, 2), (1,-2), (-1, 2), (-1, -2),
+        for dx, dy in [(1, 2), (1, -2), (-1, 2), (-1, -2),
                        (2, 1), (2, -1), (-2, 1), (-2, -1)]:
             newpos = self.pos + dx + (dy << 3)
             if not self.can_delta_move(dx, dy) or self.check_piece_color(newpos) == self.color:
@@ -651,15 +880,15 @@ class PieceChecker(MoveMaker):
         ret = set()
         forward = self.pos - 8
         double_forward = self.pos - 16
-#         print(f"""==========white_pawn_moves=================:        < --------------------------------------- REMOVE
-# pos {self.pos}
-# forward {forward}
-# double_forward {double_forward}
-# self.can_delta_move(0, -1) {self.can_delta_move(0, -1)}
-# self.check_piece(forward) {self.check_piece(forward)}
-# col {self.col}
-# row {self.row}
-# ===============================================""")
+        # print(f"""==========white_pawn_moves=================:        < --------------------------------------- REMOVE
+        # pos {self.pos}
+        # forward {forward}
+        # double_forward {double_forward}
+        # self.can_delta_move(0, -1) {self.can_delta_move(0, -1)}
+        # self.check_piece(forward) {self.check_piece(forward)}
+        # col {self.col}
+        # row {self.row}
+        # ===============================================""")
         if self.can_delta_move(0, -1) and not self.check_piece(forward):
             ret.add(forward)
             if self.row == 6 and not self.check_piece(double_forward):
@@ -702,16 +931,18 @@ if __name__ == '__main__':
 
     a = MoveMaker()
 
+
     def board_print(move=None):
         if move is not None:
             fr, to = move.split('-')
             a.make_move_safe(fr, to)
             board_print()
             return
-        print(a.proper_board(for_console=True), end = '')
+        print(a.proper_board(for_console=True), end='')
         print(a.turn + ' is to move\n')
 
-    def get_legal_moves(pos, print_tiles = True):
+
+    def get_legal_moves(pos):
         board = a.board
         if isinstance(pos, str):
             pos = a.proper_pos[pos]
@@ -719,10 +950,11 @@ if __name__ == '__main__':
         a.check_piece_color(pos)
         pc = PieceChecker(pos, board, a.check_piece_color(pos))
         for i in pc.legal_moves():
-            print(f'{a.proper_pos[i]} ', end = '')
+            print(f'{a.proper_pos[i]} ', end='')
         print("\n--------------------------------")
 
 
+    white_king = PieceChecker(a.proper_pos['e1'], a.board, a.turn)
 
     board_print('d2-d4')
     board_print('d7-d5')

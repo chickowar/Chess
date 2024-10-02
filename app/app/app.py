@@ -29,7 +29,8 @@ sio = SocketIO(app)
 
 "ORM"
 def new_id():
-    return int(randint(0,9223372036854775807))
+    return int(randint(0, 9223372036854775807))
+
 
 class BoardTable(db.Model):
     id = db.Column(db.Integer, primary_key=True, default=new_id)
