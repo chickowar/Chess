@@ -110,7 +110,6 @@ def create_board():
 
 ...
 
-
 "Utils"
 class bcolors:
     HEADER = '\033[95m'

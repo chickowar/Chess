@@ -1,4 +1,20 @@
+from select import select
+
 local_debug = False
+def dbg(s: str):
+    if local_debug:
+        print(f'\033[91mDEBUG\033[0m: {s}')
+
+# class bcolors:
+#     HEADER = '\033[95m'
+#     OKBLUE = '\033[94m'
+#     OKCYAN = '\033[96m'
+#     OKGREEN = '\033[92m'
+#     WARNING = '\033[93m'
+#     FAIL = '\033[91m'
+#     ENDC = '\033[0m'
+#     BOLD = '\033[1m'
+#     UNDERLINE = '\033[4m'
 
 """Utils"""
 is_queen = lambda x: x == 'w' or x == 'q'
@@ -99,14 +115,19 @@ class MoveMaker:
 
     black_pieces = {'l', 'L', 'w', 'W', 'm', 'M', 'v', 'V', 't', 'T', 'o', 'O'}
     white_pieces = {'k', 'K', 'q', 'Q', 'n', 'N', 'b', 'B', 'r', 'R', 'p', 'P'}
-    pc = None
 
     def __init__(self, board: str | list | None = None, turn: str = 'white') -> None:
+        # @TODO: When you implement synchronisation with SQLite db, make it so king_moved is actually up-to-date
         self.kings = {'black': 4, 'white': 60}
-        if board is not None:
+        if board is None:
+            self.board = self.board.copy()
+        elif isinstance(board, list):
+            self.board = board
+        else:
             self.board = list(board)
         self.turn = turn
         self.king_moved = {'white': False, 'black': False}
+        self.pc = None
         pass
 
     def proper_board(self, for_console=False):
@@ -171,6 +192,7 @@ class MoveMaker:
             return 'black'
         else:
             return 'white'
+        pass
 
     def check_piece(self, pos: int) -> bool:
         """
@@ -180,6 +202,7 @@ class MoveMaker:
             return False
         else:
             return True
+        pass
 
     # CALL AFTER MAKING SURE MOVE IS POSSIBLE!
     def make_move(self, tile_from: int, tile_to: int) -> None:
@@ -188,8 +211,10 @@ class MoveMaker:
         from tile_from to tile_to
         """
         # tile_to set to tile_from value, and then make tile_from empty
-        if is_king(self.board[tile_from]):
-            self.kings[self.check_piece_color(tile_from)] = tile_to
+        if is_king(self.board[tile_from].lower()):
+            clr = self.check_piece_color(tile_from)
+            self.kings[clr] = tile_to
+            self.king_moved[clr] = True
         self.board[tile_to] = self.board[tile_from]
         self.colorize_tile(tile_to)
 
@@ -209,7 +234,6 @@ class MoveMaker:
         Checks whether moving from tile_from to tile_to
         is within the rules
         """
-        # makes a PieceChecker and checks legal moves
         self.pc = PieceChecker(tile_from, self.board, self.turn)
         if tile_to in self.pc.legal_moves():
             return True
@@ -224,7 +248,7 @@ class MoveMaker:
 
         returns 'MoveMade' if move is made, 'MoveError : {description}' otherwise.
         """
-
+        # Tile conversion
         if isinstance(tile_from, str):
             if not self.is_a_tile(tile_from):
                 return 'MoveError: tile_from is not a tile'
@@ -234,41 +258,57 @@ class MoveMaker:
                 return 'MoveError: tile_to is not a tile'
             tile_to = self.proper_pos[tile_to]
 
+        # Checking the tiles
         piece_color = self.check_piece_color(tile_from)
         if piece_color == '':
             return 'MoveError: no piece on tile_from'
         elif piece_color != self.turn:
             return "MoveError: trying to move opponent's piece"
 
+        # Checking if you can actually move and PERFORMING THE MOVE
         if self.move_is_legal(tile_from, tile_to):
+            tile_to_piece = self.board[tile_to]
+            king_is_being_moved = (tile_from == self.kings[self.turn])
+            the_king_moved = self.king_moved[self.turn]
 
-            if (tile_from == self.kings[self.turn] and (tile_to == self.kings[self.turn] + 2
-               or tile_to == self.kings[self.turn] - 2) and not self.king_moved[self.turn]):
+            # Castling movement management:
+            if king_is_being_moved:
+                ooo = (tile_to == (self.kings[self.turn] - 2))
+                oo = (tile_to == (self.kings[self.turn] + 2))
+                if (oo or ooo) and the_king_moved:
+                    return 'MoveError: can not castle after king moved'
                 col = tile_from & 7
-                if tile_to == self.kings[self.turn] - 2:
+                if ooo:
                     rook_pos = tile_from - col
                     if is_rook(self.board[rook_pos].lower()):
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to + 1)
+                        self.change_turn()
                         return 'MoveMade'
                     else:
                         return 'MoveError: rook is missing for O-O-O'
-                else:
+                elif oo:
                     rook_pos = tile_from - col + 7
                     if is_rook(self.board[rook_pos].lower()):
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to - 1)
+                        self.change_turn()
                         return 'MoveMade'
                     else:
                         return 'MoveError: rook is missing for O-O'
-
+            # Regular moves
             self.make_move(tile_from, tile_to)
-            # move_is_legal(tile_from, tile_to) set pc to PieceChecker with pos = tile_from
+
             # WE CAN EITHER CHANGE MOVE_IS_LEGAL TO INVOLVE MOVING PIECE AND CHECKING WHETHER KING IS IN CHECK
             # OR WE CAN DO IT HERE. FOR THIS VERSION WE DO IT HERE.
+            # (cuz this way you only check this square for checks rather than checking every single possible move)
             if self.pc.there_is_check(self.kings[self.turn]):
+                # if king in check revert move
                 self.make_move(tile_to, tile_from)
+                self.king_moved[self.turn] = the_king_moved
+                self.board[tile_to] = tile_to_piece
                 return "MoveError: the king mustn't be endangered"
+
             self.change_turn()
             return 'MoveMade'
         else:
@@ -283,7 +323,10 @@ class PieceChecker(MoveMaker):
 
     def __init__(self, pos: int, board: list[str], turn: str):
         """it makes an object which determines
-        which piece is on the pos of the board"""
+        which piece is on the pos of the board
+        :param pos: is int
+        """
+        # @TODO: Make it create itself from MoveMaker object
         super().__init__(board, turn)
         # I don't like that we are essentially making 3 classes per move:
         # MoveMaker -> PieceChecker (in move_is_legal method) -> NEW MoveMaker (in __init__ of PieceChecker)
@@ -298,8 +341,9 @@ class PieceChecker(MoveMaker):
         self.row = pos >> 3
         self.col = pos & 7
         tile = board[pos].lower()
-        if tile == "+" or tile == "-":
+        if tile == "+" or tile == " ":
             pass  # the square is empty
+            dbg(f'! PieceChecker: {pos} {board[pos]} - not a piece')
             return
 
         # Getting the piece (and its color) of the tile
@@ -340,22 +384,25 @@ class PieceChecker(MoveMaker):
             case "p":
                 self.color = "white"
                 self.piece = "pawn"
+        dbg(f"PieceChecker(): row={self.row}, col={self.col}, pos={self.pos}, turn={self.turn}, piece={self.color} {self.piece}")
         pass
 
     def can_delta_move(self, dx, dy):
         """Returns True if moving dx horizontally
         and dy vertically is still within the board,
         returns False otherwise"""
+        # dbg(f'can_delta_move({dx}, {dy}): {(0 <= (self.col + dx) < 8)} and {(0 <= (self.row + dy) < 8)}')
         return (0 <= (self.col + dx) < 8) and (0 <= (self.row + dy) < 8)
 
     def legal_moves(self) -> set:
         """returns all legal moves for a piece"""
         if self.piece is None or self.color != self.turn:
-            # print('WTF!!!!!!!????????')
+            dbg(f'legal_moves(): No piece or wrong color')
             return set()
         # print('legal_moves: getting attribute - ')  # @TODO:DELETE ---------------------------------------------REMOVE
         # print(self.__getattribute__(f"{self.color}_{self.piece}_moves")())
         # print(f"{self.color}_{self.piece}_moves")
+        dbg(f'legal_moves(): self.{self.color}_{self.piece}_moves')
         return self.__getattribute__(f"{self.color}_{self.piece}_moves")()
 
     pass
@@ -369,6 +416,7 @@ class PieceChecker(MoveMaker):
         if isinstance(pos, str):
             pos = self.proper_pos[pos]
 
+        dbg(f'there_is_check({pos}): {self.color}')
         row = pos >> 3
         col = pos & 7
         right_up = True
@@ -393,6 +441,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         right_up = False
                 else:
@@ -406,10 +456,13 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         right = False
                 else:
                     right = False
+
             # \
             #  O
             if right_down:
@@ -419,6 +472,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         right_down = False
                 else:
@@ -433,6 +488,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         down = False
                 else:
@@ -447,6 +504,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         left_down = False
                 else:
@@ -460,6 +519,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         left = False
                 else:
@@ -474,6 +535,8 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_bishop(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         left_up = False
                 else:
@@ -488,14 +551,15 @@ class PieceChecker(MoveMaker):
                     tile = self.board[newpos].lower()
                     if (is_queen(tile) or is_rook(tile)) and self.color != piece_color:
                         return True
+                    elif tile == ' ' or tile == '+':
+                        pass
                     else:
                         up = False
                 else:
                     up = False
 
         "Knight"
-        for dx, dy in [(1, 2), (1, -2), (-1, 2), (-1, -2),
-                       (2, 1), (2, -1), (-2, 1), (-2, -1)]:
+        for dx, dy in [(1, 2), (1, -2), (-1, 2), (-1, -2), (2, 1), (2, -1), (-2, 1), (-2, -1)]:
             newpos = pos + dx + (dy << 3)
             if ((0 <= (col + dx) < 8) and (0 <= (row + dy) < 8)
                     and is_knight(self.board[newpos].lower())
@@ -514,44 +578,47 @@ class PieceChecker(MoveMaker):
                         return True
 
         "Pawn"
-        is_white = int(self.color == 'white')
-        if 0 <= (row + is_white) < 8:
-            newpos = pos + (is_white >> 3) + 1
+        dy = -1 if self.color == 'white' else 1
+        # print(dy)
+        if 0 <= (row + dy) < 8:
+            newpos = pos + (dy << 3) + 1
             if (0 < (col + 1) < 8) and is_pawn(self.board[newpos].lower()
                 ) and self.color != self.check_piece_color(newpos):
                 return True
-            newpos = pos + (is_white >> 3) - 1
+            newpos = pos + (dy << 3) - 1
             if (0 < (col - 1) < 8) and is_pawn(self.board[newpos].lower()
                 ) and self.color != self.check_piece_color(newpos):
                 return True
         return False
+        pass
 
     def white_king_moves(self) -> set:
         """Does not check for checks!"""
-        # @TODO: добавить проверку на рокировку
         ret = set()
         for i in [1, -1, 0]:
             for j in [1, -1, 0]:
-                if (i != 0 or j != 0) and self.can_delta_move(i, j):
-                    newpos = self.pos + (i << 3) + j
-                    # if self.there_is_check(newpos):
+                newpos = self.pos + (j << 3) + i
+                dbg(f'white_king_moves(): i={i} j={j}')
+                if (i != 0 or j != 0) and self.can_delta_move(i, j) and self.color != self.check_piece_color(newpos):
+                    # if self.there_is_check(newpos):  Пока что без этого птому что Doesnt check for checks
                     ret.add(newpos)
-        if not self.king_moved[self.color]:
+                    dbg(f'added {newpos}')
+        if not self.king_moved[self.color] and not self.there_is_check(self.pos):
             tile1 = self.board[self.pos + 1]
             tile2 = self.board[self.pos + 2]
             if (
-                self.can_delta_move(self.col + 1, self.row) and (tile1 == ' ' or tile1 == '+')
+                self.can_delta_move(1, 0) and (tile1 == ' ' or tile1 == '+')
                 and not self.there_is_check(self.pos + 1)  and
-                self.can_delta_move(self.col + 2, self.row) and (tile2 == ' ' or tile2 == '+')
+                self.can_delta_move(2, 0) and (tile2 == ' ' or tile2 == '+')
                 and not self.there_is_check(self.pos + 2)
             ):
                 ret.add(self.pos + 2)
             tile1 = self.board[self.pos - 1]
             tile2 = self.board[self.pos - 2]
             if (
-                    self.can_delta_move(self.col - 1, self.row) and (tile1 == ' ' or tile1 == '+')
+                    self.can_delta_move(-1, 0) and (tile1 == ' ' or tile1 == '+')
                     and not self.there_is_check(self.pos - 1) and
-                    self.can_delta_move(self.col - 2, self.row) and (tile2 == ' ' or tile2 == '+')
+                    self.can_delta_move(-2, 0) and (tile2 == ' ' or tile2 == '+')
                     and not self.there_is_check(self.pos - 2)
             ):
                 ret.add(self.pos - 2)
@@ -927,19 +994,32 @@ class PieceChecker(MoveMaker):
 
 
 if __name__ == '__main__':
-    local_debug = True
+
+    class bcolors:
+        HEADER = '\033[95m'
+        OKBLUE = '\033[94m'
+        OKCYAN = '\033[96m'
+        OKGREEN = '\033[92m'
+        WARNING = '\033[93m'
+        FAIL = '\033[91m'
+        ENDC = '\033[0m'
+        BOLD = '\033[1m'
+        UNDERLINE = '\033[4m'
+
+    # local_debug = True
 
     a = MoveMaker()
 
+    def board_print(the_move=None):
+        move(the_move, True)
 
-    def board_print(move=None):
-        if move is not None:
-            fr, to = move.split('-')
-            a.make_move_safe(fr, to)
-            board_print()
-            return
-        print(a.proper_board(for_console=True), end='')
-        print(a.turn + ' is to move\n')
+    def move(the_move=None, do_print = False):
+        if the_move is not None:
+            fr, to = the_move.split('-')
+            print(a.make_move_safe(fr, to))
+        if do_print:
+            print(a.proper_board(for_console=True), end='')
+            print(a.turn + ' is to move\n')
 
 
     def get_legal_moves(pos):
@@ -950,19 +1030,25 @@ if __name__ == '__main__':
         a.check_piece_color(pos)
         pc = PieceChecker(pos, board, a.check_piece_color(pos))
         for i in pc.legal_moves():
+            # print(i)
             print(f'{a.proper_pos[i]} ', end='')
         print("\n--------------------------------")
 
+    def highlight_checks(color='white'):
+        print('CHECKS for ' + color + ':')
+        pc = PieceChecker(a.kings[color], a.board, color)
+        ret = '|'
+        newret = ''
+        for i in range(64):
+            if i % 8 == 0 and i != 0:
+                ret += newret + '|\n'
+                newret = '|'
+            if pc.there_is_check(i):
+                newret += bcolors.FAIL + bcolors.UNDERLINE + a.board[i] + bcolors.ENDC + bcolors.ENDC
+            else:
+                newret += a.board[i]
+        ret += newret + '|\n'
+        print(ret)
 
-    white_king = PieceChecker(a.proper_pos['e1'], a.board, a.turn)
-
-    board_print('d2-d4')
-    board_print('d7-d5')
-    get_legal_moves('d1')
-    # board_print()
-    # board_print('e2-e4')
-    # board_print('d7-d5')
-    # get_legal_moves('d1')
-    # get_legal_moves('d8')
-    # board_print('d1-h5')
-    # get_legal_moves('h5')
+    board_print()
+    move()
