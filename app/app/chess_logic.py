@@ -1,4 +1,5 @@
 # from select import select
+# from collections import deque
 
 local_debug = False
 
@@ -29,7 +30,7 @@ is_pawn = lambda x: x == 'o' or x == 'p'
 
 """MoveMaker"""
 
-
+#       ?????????????????????? SHOULD I DO CHECKS?????????????????
 class MoveMaker:
     # @TODO: when you're going to make it all stored in sqlite, just make new movemakers every time
     # @TODO: and make a .get_info_to_store() method to extract board and turn to put into sqlite table
@@ -101,19 +102,19 @@ class MoveMaker:
                   'g1': 62, 62: 'g1',
                   'h1': 63, 63: 'h1'}
     pieces = {
-        "BlackKing": 'l',
-        "BlackQueen": 'w',
-        "BlackKnight": 'm',
-        "BlackBishop": 'v',
-        "BlackRook": 't',
-        "BlackPawn": 'o',
+        "black_king": 'l',
+        "black_queen": 'w',
+        "black_knight": 'm',
+        "black_bishop": 'v',
+        "black_rook": 't',
+        "black_pawn": 'o',
 
-        "WhiteKing": 'k',
-        "WhiteQueen": 'q',
-        "WhiteKnight": 'n',
-        "WhiteBishop": 'b',
-        "WhiteRook": 'r',
-        "WhitePawn": 'p'
+        "white_king": 'k',
+        "white_queen": 'q',
+        "white_knight": 'n',
+        "white_bishop": 'b',
+        "white_rook": 'r',
+        "white_pawn": 'p'
     }
 
     black_pieces = {'l', 'L', 'w', 'W', 'm', 'M', 'v', 'V', 't', 'T', 'o', 'O'}
@@ -124,12 +125,36 @@ class MoveMaker:
         'white_bishop_left': 58, 'white_bishop_right': 61, 'black_bishop_left': 2, 'black_bishop_right': 5,
         'white_queen': 59, 'white_king': 60, 'black_queen': 3, 'black_king': 4
     }
+    kings = {'black': 4, 'white': 60}
+    unmoved_pieces = {'white_rook_left', 'white_rook_right', 'black_rook_left',
+                      'black_rook_right', 'white_king', 'black_king'}
 
-    def __init__(self, board: str | list | None = None, turn: str = 'white') -> None:
-        # @TODO: When you implement synchronisation with SQLite db, make it so king_moved is actually up-to-date
-        self.kings = {'black': 4, 'white': 60}
-        self.unmoved_pieces = {'white_rook_left', 'white_rook_right', 'black_rook_left',
-                               'black_rook_right', 'white_king', 'black_king'}
+    def __init__(self, board: str | list[str] | None = None,
+                 turn: str = 'white',
+                 kings=None,
+                 unmoved_pieces=None,
+                 prev_moves: list[str] = None
+                 ) -> None:
+        if prev_moves is None:
+            prev_moves = []
+        self.prev_moves = prev_moves
+        # We store moves like this {from}-{to}|{param1}|{param2}|... or 'O-O-O' or 'O-O'
+        # params could be:
+        # x{piece} - piece taken from {to},  # for now we store pieces like 'P' or 'o'
+        # p{piece} - piece taken by en passant,
+        # m{piece} - first time moving piece # for now we store it as 'black_rook_left' or 'white_king'
+        # @TODO:  I think it's better to store short versions of pieces like: wrl for white_rook_left
+        # @TODO:  or even better we can store them as numbers having dictionary of correspondence
+        # @TODO:  We can also add check this way and track it in self.prev_moves (if I decide to add checks)
+        # We could get the board by previous moves, just doing one after the other. Maybe do it so you
+        # could __init__ with board={board}|None, prev_moves = {list_of_moves} and it plays the moves one by one,
+        # getting to needed position. It could be interesting, but not needed immediately
+        if kings is None:
+            kings = self.kings.copy()
+        self.kings = kings
+        if unmoved_pieces is None:
+            unmoved_pieces = self.unmoved_pieces.copy()
+        self.unmoved_pieces = unmoved_pieces
         if board is None:
             self.board = self.board.copy()
         elif isinstance(board, list):
@@ -138,7 +163,6 @@ class MoveMaker:
             self.board = list(board)
         self.turn = turn
         self.pc = None
-        pass
 
     def proper_board(self, for_console=False):
         """Returns a board in 8 lines, not in 1 line.
@@ -226,10 +250,11 @@ class MoveMaker:
         piece = self.board[tile_from].lower()
         if is_king(piece):
             self.kings[clr] = tile_to
-            self.unmoved_pieces.remove(clr + '_king')
+            if clr + '_king' in self.unmoved_pieces:
+                self.unmoved_pieces.remove(clr + '_king')
         elif is_rook(piece):
-            rook_left = clr + '_' + piece + '_left'
-            rook_right = clr + '_' + piece + '_right'
+            rook_left = clr + '_rook_left'
+            rook_right = clr + '_rook_right'
             if rook_left in self.unmoved_pieces and tile_from == self.original_places[rook_left]:
                 self.unmoved_pieces.remove(rook_left)
             elif rook_right in self.unmoved_pieces and tile_from == self.original_places[rook_right]:
@@ -254,7 +279,7 @@ class MoveMaker:
         Checks whether moving from tile_from to tile_to
         is within the rules NOT THINKING ABOUT CHECKS!
         """
-        self.pc = PieceChecker(tile_from, self.board, self.turn)
+        self.pc = PieceChecker(tile_from, self)
         if tile_to in self.pc.legal_moves():
             return True
         else:
@@ -265,7 +290,7 @@ class MoveMaker:
         """
         Makes a move from tile_from to tile_to.
         But only if it is within the rules!
-
+        Also writes the move down in self.prev_moves
         :returns: 'MoveMade' if move is made, 'MoveError : {description}' otherwise.
         """
         # @TODO: Perhaps, moving there_is_check into MoveMaker class would cut memory usage. Think about it...
@@ -291,9 +316,10 @@ class MoveMaker:
             tile_to_piece = self.board[tile_to]
             king_is_being_moved = (tile_from == self.kings[self.turn])
             left_rook_first_move = (self.turn + '_rook_left' in self.unmoved_pieces) and (
-                        tile_from == self.original_places[self.turn + '_rook_left'])
+                    tile_from == self.original_places[self.turn + '_rook_left'])
             right_rook_first_move = (self.turn + '_rook_right' in self.unmoved_pieces) and (
-                        tile_from == self.original_places[self.turn + '_rook_right'])
+                    tile_from == self.original_places[self.turn + '_rook_right'])
+            king_first_move = (tile_from == self.kings[self.turn]) and ((self.turn + '_king') in self.unmoved_pieces)
             # Castling movement management:
             if king_is_being_moved:
                 ooo = (tile_to == (self.kings[self.turn] - 2))
@@ -307,6 +333,7 @@ class MoveMaker:
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to + 1)
                         self.change_turn()
+                        self.prev_moves.append('O-O-O')
                         return 'MoveMade'
                 elif oo:
                     rook_pos = tile_from - col + 7
@@ -316,6 +343,7 @@ class MoveMaker:
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to - 1)
                         self.change_turn()
+                        self.prev_moves.append('O-O')
                         return 'MoveMade'
 
             # Regular moves
@@ -333,11 +361,48 @@ class MoveMaker:
                 self.board[tile_to] = tile_to_piece
                 return "MoveError: the king mustn't be endangered"
 
+            # Writing the move down
+            the_move = self.proper_pos[tile_from] + '-' + self.proper_pos[tile_to]
+            if left_rook_first_move: the_move += f"|m{self.turn}_rook_left"
+            if right_rook_first_move: the_move += f"|m{self.turn}_rook_right"
+            if king_first_move: the_move += f"|m{self.turn}_king"
+            if tile_to_piece != ' ' and tile_to_piece != '+': the_move += f"|x{tile_to_piece}"
+            self.prev_moves.append(the_move)
             self.change_turn()
             return 'MoveMade'
         else:
             return 'MoveError: illegal move'
         pass  # ########################################################################################################
+
+    def revert_last_move(self):
+        """Reverts the last move changing the board and modifying self.kings and self.unmoved_pieces accordingly"""
+        if len(self.prev_moves) == 0:
+            dbg('revert_last_move: No moves to revert')
+            return
+        last_move = self.prev_moves.pop().split('|')
+        dbg(f"revert_last_move: last_move={last_move}")
+        self.change_turn()
+        if last_move[0] == 'O-O' or last_move[0] == 'O-O-O':
+            isOO = 2 * int(last_move[0] == 'O-O') - 1
+            king_place = self.original_places[self.turn + '_king']
+            side = 'right' if isOO == 1 else 'left'
+            self.make_move(king_place + isOO + isOO, king_place)
+            self.make_move(king_place + isOO, king_place + isOO + isOO + isOO)
+            self.unmoved_pieces.add(self.turn + '_king')
+            self.unmoved_pieces.add(self.turn + '_rook_' + side)
+            return
+        fr, to = map(self.proper_pos.__getitem__, last_move[0].split('-'))
+        self.make_move(to, fr)
+        for i in range(1, len(last_move)):
+            param = last_move[i]
+            match param[0]:
+                case 'm':
+                    self.unmoved_pieces.add(param[1:])
+                case 'x':
+                    self.board[to] = param[1]
+                case 'p':
+                    # @TODO: EN PASSANT MANAGEMENT!
+                    pass
 
 
 # @TODO: (можно кстати на nparray'и переписать. Может быть полезно)
@@ -347,29 +412,29 @@ class PieceChecker(MoveMaker):
     """Pass pos into PieceChecker and you can check
     for legal moves on the board for that piece (does not check for checks in legal_moves method)"""
 
-    def __init__(self, pos: int, board: list[str], turn: str):
+    def __init__(self, pos: int, move_maker: MoveMaker):
         """it makes an object which determines
         which piece is on the pos of the board
         :param pos: is int
+        :param move_maker: is a MoveMaker object from which you create PieceChecker object
         """
-        # @TODO: Make it create itself from MoveMaker object
-        super().__init__(board, turn)
+        super().__init__(move_maker.board, move_maker.turn, move_maker.kings, move_maker.unmoved_pieces,
+                         move_maker.prev_moves)
         # I don't like that we are essentially making 3 classes per move:
         # MoveMaker -> PieceChecker (in move_is_legal method) -> NEW MoveMaker (in __init__ of PieceChecker)
-        # perhaps we could make 1st and 2nd MoveMaker the same by something like
-
-        # def __init__(self, move_maker_obj: MoveMaker):
-        #     super() = move_maker_obj
+        # perhaps we could make 1st and 2nd MoveMaker the same by just storing self.move_maker in PieceChecker
+        # and overloading __get_attribute__ method so that if attribute is not a part of PieceChecker, then it goes to
+        # self.move_maker's attribute. And PieceChecker class can have move_maker set to MoveMaker class by default
 
         self.piece = None
         self.color = None
         self.pos = pos
         self.row = pos >> 3
         self.col = pos & 7
-        tile = board[pos].lower()
+        tile = move_maker.board[pos].lower()
         if tile == "+" or tile == " ":
             pass  # the square is empty
-            dbg(f'! PieceChecker: {pos} {board[pos]} - not a piece')
+            dbg(f'! PieceChecker: {pos} {move_maker.board[pos]} - not a piece')
             return
 
         # Getting the piece (and its color) of the tile
@@ -424,9 +489,6 @@ class PieceChecker(MoveMaker):
         if self.piece is None or self.color != self.turn:
             dbg(f'legal_moves(): No piece or wrong color')
             return set()
-        # print('legal_moves: getting attribute - ')  # @TODO:DELETE ---------------------------------------------REMOVE
-        # print(self.__getattribute__(f"{self.color}_{self.piece}_moves")())
-        # print(f"{self.color}_{self.piece}_moves")
         dbg(f'legal_moves(): self.{self.color}_{self.piece}_moves')
         return self.__getattribute__(f"{self.color}_{self.piece}_moves")()
 
@@ -1053,7 +1115,7 @@ if __name__ == '__main__':
             pos = a.proper_pos[pos]
         print(f'--------legal_moves_for {board[pos]}-------')
         a.check_piece_color(pos)
-        pc = PieceChecker(pos, board, a.check_piece_color(pos))
+        pc = PieceChecker(pos, a)
         for i in pc.legal_moves():
             # print(i)
             print(f'{a.proper_pos[i]} ', end='')
@@ -1062,7 +1124,7 @@ if __name__ == '__main__':
 
     def highlight_checks(color='white'):
         print('CHECKS for ' + color + ':')
-        pc = PieceChecker(a.kings[color], a.board, color)
+        pc = PieceChecker(a.kings[color], a)
         ret = '|'
         newret = ''
         for i in range(64):
@@ -1079,17 +1141,11 @@ if __name__ == '__main__':
 
     move('e2-e4')
     move('e7-e5')
-    move('b2-b3')
-    move('d8-e7')
-    move('c1-b2')
-    move('d7-d6')
-    move('b1-c3')
-    move('b8-c6')
-    move('d1-g4')
-    move('c8-f5')
-    local_debug = True
-    move('e1-c1')
-    local_debug = False
-    move('e8-c8')
-    highlight_checks('white')
+    move('g1-f3')
+    move('g8-f6')
+    move('f1-e2')
+    move('f8-e7')
+    board_print('e1-g1')
+    a.revert_last_move()
+    print(a.prev_moves)
     board_print()

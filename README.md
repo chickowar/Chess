@@ -1,8 +1,9 @@
 # Chess
 Trying to make web platform for Chess (Sweden Variation)
 
-# 0.1.5 - Fixed castling bugs
+## 0.1.6 - 
+### Added move tracking, reverting moves, NEW WEBSITE INPUT '-' (which reverts a move)
+### fixed bugs of tracking unmoved_pieces, fixed the way MoveMaker and PieceChecker work
 
-Commit - "Fixed Castling"
-1 room, working board, ACTUAL CHESS LOGIC, turn-based
-#### Faults: no en passant, no mates
+Commit - "Tracking and reverting moves"
+1 room, working chess, no mate, no in-check state, tracks and reverts moves
