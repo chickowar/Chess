@@ -1,4 +1,4 @@
-# Version 0.1.4
+# Version 0.1.5
 to run it you have to (in Chess\app):
 ```commandline
 poetry install
@@ -16,33 +16,18 @@ restart your pc and only then the fonts will appear on the page properly
 ##### (meaning website logic will be in app\app.py and chess logic in app\chess_logic.py)
 
 ---
-Commit - "Added castle and banned king-endangerment"
+Commit - "Fixed Castling"
 1 room, working board, ACTUAL CHESS LOGIC, turn-based
 ### Changes:
-1) Now MoveMaker doesn't create new board if board is passed on as a list,
-which means PieceChecker doesn't create a new board when created from
-MoveMaker object's board.
-2) Added king_moved dict and kings dict to MoveMaker, tracking whether
-a king has moved and where he is located (respectively).
-3) Fixed a bug in which kings were able to eat their citizens
-4) make_move now tracks if you move a king
-5) added lambda functions is_king, is_pawn, etc. which return True 
-if you pass lowercase letter of the fitting piece into the function
-6) ADDED there_is_check FUNCTION TO PieceChecker! Now if you make PieceChecker 
-object out of white piece you can check whether white king would be in danger on 
-a certain tile. !!! WARNING !!! The there_is_check function only checks for checks on 
-the board specifically and doesn't say whether the move by king there is actually possible
-That makes stuff like that occur: [+ + Tk+] where the tile to the right of the king is 
-not in check, even though moving king there is not possible.
-7) make_move_safe now detects if after you move a piece, the king would be in danger and reverts the move if so.
-8) Added actual castling logic.
+1) Fixed Castling bug (it checked whether rook moved instead of whether it didn't in rook_unmoved. 
+Which made castling impossible)
 
 #### Faults: no en passant, no mates
 check todos in chess_logic.py
 
-1) Next: en passant
-2) after that: proper room joining
-3) after that: storing everything in sqlite
+1) Next: store moves for en passant
+2) after that: storing everything in sqlite
+3) after that: proper room joining
 4) after that: ... 
 
 I'll think later, but we have to make

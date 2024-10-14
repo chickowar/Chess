@@ -1,9 +1,12 @@
-from select import select
+# from select import select
 
 local_debug = False
+
+
 def dbg(s: str):
     if local_debug:
         print(f'\033[91mDEBUG\033[0m: {s}')
+
 
 # class bcolors:
 #     HEADER = '\033[95m'
@@ -115,10 +118,18 @@ class MoveMaker:
 
     black_pieces = {'l', 'L', 'w', 'W', 'm', 'M', 'v', 'V', 't', 'T', 'o', 'O'}
     white_pieces = {'k', 'K', 'q', 'Q', 'n', 'N', 'b', 'B', 'r', 'R', 'p', 'P'}
+    original_places = {
+        'white_rook_left': 56, 'white_rook_right': 63, 'black_rook_left': 0, 'black_rook_right': 7,
+        'white_knight_left': 57, 'white_knight_right': 62, 'black_knight_left': 1, 'black_knight_right': 6,
+        'white_bishop_left': 58, 'white_bishop_right': 61, 'black_bishop_left': 2, 'black_bishop_right': 5,
+        'white_queen': 59, 'white_king': 60, 'black_queen': 3, 'black_king': 4
+    }
 
     def __init__(self, board: str | list | None = None, turn: str = 'white') -> None:
         # @TODO: When you implement synchronisation with SQLite db, make it so king_moved is actually up-to-date
         self.kings = {'black': 4, 'white': 60}
+        self.unmoved_pieces = {'white_rook_left', 'white_rook_right', 'black_rook_left',
+                               'black_rook_right', 'white_king', 'black_king'}
         if board is None:
             self.board = self.board.copy()
         elif isinstance(board, list):
@@ -126,7 +137,6 @@ class MoveMaker:
         else:
             self.board = list(board)
         self.turn = turn
-        self.king_moved = {'white': False, 'black': False}
         self.pc = None
         pass
 
@@ -209,12 +219,22 @@ class MoveMaker:
         """
         Forcingly moves a piece
         from tile_from to tile_to
+        :returns: None
         """
         # tile_to set to tile_from value, and then make tile_from empty
-        if is_king(self.board[tile_from].lower()):
-            clr = self.check_piece_color(tile_from)
+        clr = self.check_piece_color(tile_from)
+        piece = self.board[tile_from].lower()
+        if is_king(piece):
             self.kings[clr] = tile_to
-            self.king_moved[clr] = True
+            self.unmoved_pieces.remove(clr + '_king')
+        elif is_rook(piece):
+            rook_left = clr + '_' + piece + '_left'
+            rook_right = clr + '_' + piece + '_right'
+            if rook_left in self.unmoved_pieces and tile_from == self.original_places[rook_left]:
+                self.unmoved_pieces.remove(rook_left)
+            elif rook_right in self.unmoved_pieces and tile_from == self.original_places[rook_right]:
+                self.unmoved_pieces.remove(rook_right)
+
         self.board[tile_to] = self.board[tile_from]
         self.colorize_tile(tile_to)
 
@@ -232,7 +252,7 @@ class MoveMaker:
     def move_is_legal(self, tile_from: int, tile_to: int) -> bool:
         """
         Checks whether moving from tile_from to tile_to
-        is within the rules
+        is within the rules NOT THINKING ABOUT CHECKS!
         """
         self.pc = PieceChecker(tile_from, self.board, self.turn)
         if tile_to in self.pc.legal_moves():
@@ -246,8 +266,9 @@ class MoveMaker:
         Makes a move from tile_from to tile_to.
         But only if it is within the rules!
 
-        returns 'MoveMade' if move is made, 'MoveError : {description}' otherwise.
+        :returns: 'MoveMade' if move is made, 'MoveError : {description}' otherwise.
         """
+        # @TODO: Perhaps, moving there_is_check into MoveMaker class would cut memory usage. Think about it...
         # Tile conversion
         if isinstance(tile_from, str):
             if not self.is_a_tile(tile_from):
@@ -269,43 +290,46 @@ class MoveMaker:
         if self.move_is_legal(tile_from, tile_to):
             tile_to_piece = self.board[tile_to]
             king_is_being_moved = (tile_from == self.kings[self.turn])
-            the_king_moved = self.king_moved[self.turn]
-
+            left_rook_first_move = (self.turn + '_rook_left' in self.unmoved_pieces) and (
+                        tile_from == self.original_places[self.turn + '_rook_left'])
+            right_rook_first_move = (self.turn + '_rook_right' in self.unmoved_pieces) and (
+                        tile_from == self.original_places[self.turn + '_rook_right'])
             # Castling movement management:
             if king_is_being_moved:
                 ooo = (tile_to == (self.kings[self.turn] - 2))
                 oo = (tile_to == (self.kings[self.turn] + 2))
-                if (oo or ooo) and the_king_moved:
-                    return 'MoveError: can not castle after king moved'
                 col = tile_from & 7
                 if ooo:
                     rook_pos = tile_from - col
-                    if is_rook(self.board[rook_pos].lower()):
+                    if self.pc.there_is_check(tile_from - 1) and self.pc.there_is_check(tile_from - 2):
+                        return "MoveError: can't move in check during O-O-O"
+                    else:
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to + 1)
                         self.change_turn()
                         return 'MoveMade'
-                    else:
-                        return 'MoveError: rook is missing for O-O-O'
                 elif oo:
                     rook_pos = tile_from - col + 7
-                    if is_rook(self.board[rook_pos].lower()):
+                    if self.pc.there_is_check(tile_from + 1) and self.pc.there_is_check(tile_from + 2):
+                        return "MoveError: can't move in check during O-O"
+                    else:
                         self.make_move(tile_from, tile_to)
                         self.make_move(rook_pos, tile_to - 1)
                         self.change_turn()
                         return 'MoveMade'
-                    else:
-                        return 'MoveError: rook is missing for O-O'
+
             # Regular moves
             self.make_move(tile_from, tile_to)
-
-            # WE CAN EITHER CHANGE MOVE_IS_LEGAL TO INVOLVE MOVING PIECE AND CHECKING WHETHER KING IS IN CHECK
-            # OR WE CAN DO IT HERE. FOR THIS VERSION WE DO IT HERE.
-            # (cuz this way you only check this square for checks rather than checking every single possible move)
             if self.pc.there_is_check(self.kings[self.turn]):
-                # if king in check revert move
                 self.make_move(tile_to, tile_from)
-                self.king_moved[self.turn] = the_king_moved
+                # Returning pieces in unmoved set could be done smarter than three ifs,
+                # but because we only track rooks and kings, I will kep it that way
+                if king_is_being_moved:
+                    self.unmoved_pieces.add(self.turn + '_king')
+                elif left_rook_first_move:
+                    self.unmoved_pieces.add(self.turn + '_rook_left')
+                elif right_rook_first_move:
+                    self.unmoved_pieces.add(self.turn + '_rook_right')
                 self.board[tile_to] = tile_to_piece
                 return "MoveError: the king mustn't be endangered"
 
@@ -320,6 +344,8 @@ class MoveMaker:
 
 
 class PieceChecker(MoveMaker):
+    """Pass pos into PieceChecker and you can check
+    for legal moves on the board for that piece (does not check for checks in legal_moves method)"""
 
     def __init__(self, pos: int, board: list[str], turn: str):
         """it makes an object which determines
@@ -391,7 +417,6 @@ class PieceChecker(MoveMaker):
         """Returns True if moving dx horizontally
         and dy vertically is still within the board,
         returns False otherwise"""
-        # dbg(f'can_delta_move({dx}, {dy}): {(0 <= (self.col + dx) < 8)} and {(0 <= (self.row + dy) < 8)}')
         return (0 <= (self.col + dx) < 8) and (0 <= (self.row + dy) < 8)
 
     def legal_moves(self) -> set:
@@ -583,11 +608,11 @@ class PieceChecker(MoveMaker):
         if 0 <= (row + dy) < 8:
             newpos = pos + (dy << 3) + 1
             if (0 < (col + 1) < 8) and is_pawn(self.board[newpos].lower()
-                ) and self.color != self.check_piece_color(newpos):
+                                               ) and self.color != self.check_piece_color(newpos):
                 return True
             newpos = pos + (dy << 3) - 1
             if (0 < (col - 1) < 8) and is_pawn(self.board[newpos].lower()
-                ) and self.color != self.check_piece_color(newpos):
+                                               ) and self.color != self.check_piece_color(newpos):
                 return True
         return False
         pass
@@ -598,29 +623,26 @@ class PieceChecker(MoveMaker):
         for i in [1, -1, 0]:
             for j in [1, -1, 0]:
                 newpos = self.pos + (j << 3) + i
-                dbg(f'white_king_moves(): i={i} j={j}')
+                # dbg(f'white_king_moves(): i={i} j={j}')
                 if (i != 0 or j != 0) and self.can_delta_move(i, j) and self.color != self.check_piece_color(newpos):
-                    # if self.there_is_check(newpos):  Пока что без этого птому что Doesnt check for checks
                     ret.add(newpos)
-                    dbg(f'added {newpos}')
-        if not self.king_moved[self.color] and not self.there_is_check(self.pos):
+                    # dbg(f'added {newpos}')
+        dbg(f"{self.color}_king_moves ({self.pos}={self.proper_pos[self.pos]}): ")
+        king_unmoved = ((self.color + '_king') in self.unmoved_pieces)
+        dbg(f"king_unmoved = {king_unmoved}")
+        if king_unmoved and not self.there_is_check(self.pos):
             tile1 = self.board[self.pos + 1]
             tile2 = self.board[self.pos + 2]
-            if (
-                self.can_delta_move(1, 0) and (tile1 == ' ' or tile1 == '+')
-                and not self.there_is_check(self.pos + 1)  and
-                self.can_delta_move(2, 0) and (tile2 == ' ' or tile2 == '+')
-                and not self.there_is_check(self.pos + 2)
-            ):
+            rook_unmoved = ((self.color + '_rook_right') in self.unmoved_pieces)
+            if (tile1 == ' ' or tile1 == '+') and (tile2 == ' ' or tile2 == '+') and rook_unmoved:
                 ret.add(self.pos + 2)
             tile1 = self.board[self.pos - 1]
             tile2 = self.board[self.pos - 2]
-            if (
-                    self.can_delta_move(-1, 0) and (tile1 == ' ' or tile1 == '+')
-                    and not self.there_is_check(self.pos - 1) and
-                    self.can_delta_move(-2, 0) and (tile2 == ' ' or tile2 == '+')
-                    and not self.there_is_check(self.pos - 2)
-            ):
+            tile3 = self.board[self.pos - 3]
+            rook_unmoved = ((self.color + '_rook_left') in self.unmoved_pieces)
+            dbg(f"rook_unmoved (OOO) = {rook_unmoved}, \ntile1: {(tile1 == ' ' or tile1 == '+')}\t tile2: {(tile2 == ' ' or tile2 == '+')}\t tile3 {(tile3 == ' ' or tile3 == '+')} ")
+            if ((tile1 == ' ' or tile1 == '+') and (tile2 == ' ' or tile2 == '+')
+                    and (tile3 == ' ' or tile3 == '+') and rook_unmoved):
                 ret.add(self.pos - 2)
         return ret
 
@@ -1006,17 +1028,20 @@ if __name__ == '__main__':
         BOLD = '\033[1m'
         UNDERLINE = '\033[4m'
 
+
     # local_debug = True
 
     a = MoveMaker()
 
+
     def board_print(the_move=None):
         move(the_move, True)
 
-    def move(the_move=None, do_print = False):
+
+    def move(the_move=None, do_print=False):
         if the_move is not None:
             fr, to = the_move.split('-')
-            print(a.make_move_safe(fr, to))
+            print(a.make_move_safe(fr, to), f"| {bcolors.UNDERLINE + the_move + bcolors.ENDC}")
         if do_print:
             print(a.proper_board(for_console=True), end='')
             print(a.turn + ' is to move\n')
@@ -1034,6 +1059,7 @@ if __name__ == '__main__':
             print(f'{a.proper_pos[i]} ', end='')
         print("\n--------------------------------")
 
+
     def highlight_checks(color='white'):
         print('CHECKS for ' + color + ':')
         pc = PieceChecker(a.kings[color], a.board, color)
@@ -1050,5 +1076,20 @@ if __name__ == '__main__':
         ret += newret + '|\n'
         print(ret)
 
+
+    move('e2-e4')
+    move('e7-e5')
+    move('b2-b3')
+    move('d8-e7')
+    move('c1-b2')
+    move('d7-d6')
+    move('b1-c3')
+    move('b8-c6')
+    move('d1-g4')
+    move('c8-f5')
+    local_debug = True
+    move('e1-c1')
+    local_debug = False
+    move('e8-c8')
+    highlight_checks('white')
     board_print()
-    move()
