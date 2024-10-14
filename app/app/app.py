@@ -60,8 +60,11 @@ def handle_submit_move(data):
         # print('handle_submit_move: trying to split')
         move_from, move_to = move.split('-')
         # print('handle_submit_move: trying_to_move')
-        result = test_board.make_move_safe(move_from, move_to)
-        print(result)
+        if move_from == '' and move_to == '':
+            result = test_board.revert_last_move()
+        else:
+            result = test_board.make_move_safe(move_from, move_to)
+        print(result, test_board.prev_moves)
     except Exception as e:
         warn(f"IMPROPER MOVE - {move} | {e}")
     emit('update_board', test_board.proper_board(), room=data['room_id'],broadcast=True)
